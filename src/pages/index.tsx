@@ -1,6 +1,5 @@
-// pages/index.tsx
-import { useState, useEffect, useRef } from 'react';
-import VideoCall from '../components/VideoCall/VideoCall';
+
+import VideoCall from '../components/VideoCall';
 
 const Home = () => {
   return (

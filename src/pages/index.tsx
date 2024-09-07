@@ -13,8 +13,10 @@ const Home = () => {
     const ws = new WebSocket(signalingServer);
     ws.onopen = () => console.log('WebSocket connected');
     ws.onmessage = handleSignalingData;
+    ws.onerror = (error) => console.error('WebSocket error:', error);
+    ws.onclose = (event) => console.log('WebSocket closed:', event);
     setWebSocket(ws);
-
+  
     return () => {
       endCall();
       ws.close();
@@ -23,51 +25,72 @@ const Home = () => {
 
   const handleSignalingData = async (message: MessageEvent) => {
     const data = JSON.parse(message.data);
+    console.log('Received signaling data:', data)
+
+    if (!peerConnection.current) {
+      console.error('PeerConnection not initialized');
+      return;
+    }
 
     switch (data.type) {
       case 'offer':
-        await peerConnection.current?.setRemoteDescription(new RTCSessionDescription(data));
-        const answer = await peerConnection.current?.createAnswer();
-        await peerConnection.current?.setLocalDescription(answer!);
+        console.log('Received offer:', data);
+        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data));
+        const answer = await peerConnection.current.createAnswer();
+        await peerConnection.current.setLocalDescription(answer);
         webSocket?.send(JSON.stringify({ type: 'answer', data: answer }));
         break;
       case 'answer':
-        await peerConnection.current?.setRemoteDescription(new RTCSessionDescription(data));
+        console.log('Received answer:', data);
+        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data));
         break;
       case 'candidate':
-        await peerConnection.current?.addIceCandidate(new RTCIceCandidate(data.candidate));
+        console.log('Received candidate:', data);
+        await peerConnection.current.addIceCandidate(new RTCIceCandidate(data.candidate));
         break;
       default:
+        console.log('Unknown message type:', data.type);
         break;
     }
   };
 
   const startCall = async () => {
-    peerConnection.current = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-    });
+    try {
+      peerConnection.current = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      });
 
-    peerConnection.current.onicecandidate = (event) => {
-      if (event.candidate) {
-        webSocket?.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+      peerConnection.current.onicecandidate = (event) => {
+        if (event.candidate) {
+          console.log('Sending ICE candidate:', event.candidate);
+          webSocket?.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+        }
+      };
+
+      peerConnection.current.ontrack = (event) => {
+        if (remoteVideoRef.current && event.streams && event.streams[0]) {
+          console.log('Received remote stream:', event.streams[0]);
+          remoteVideoRef.current.srcObject = event.streams[0];
+        }
+      };
+
+      localStream.current = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localStream.current.getTracks().forEach((track) => {
+        if (peerConnection.current && localStream.current) {
+          peerConnection.current.addTrack(track, localStream.current);
+        }
+      });
+
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = localStream.current;
       }
-    };
 
-    peerConnection.current.ontrack = (event) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = event.streams[0];
-      }
-    };
-
-    localStream.current = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    localStream.current.getTracks().forEach((track) => peerConnection.current?.addTrack(track, localStream.current!));
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = localStream.current;
+      const offer = await peerConnection.current.createOffer();
+      await peerConnection.current.setLocalDescription(offer);
+      webSocket?.send(JSON.stringify({ type: 'offer', data: offer }));
+    } catch (error) {
+      console.error('Error starting call:', error);
     }
-
-    const offer = await peerConnection.current.createOffer();
-    await peerConnection.current.setLocalDescription(offer);
-    webSocket?.send(JSON.stringify({ type: 'offer', data: offer }));
   };
 
   const endCall = () => {
@@ -75,21 +98,21 @@ const Home = () => {
       peerConnection.current.close();
       peerConnection.current = null;
     }
-
+  
     if (localStream.current) {
       localStream.current.getTracks().forEach((track) => track.stop());
       localStream.current = null;
     }
-
+  
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = null;
     }
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = null;
     }
-
-    if (webSocket) {
-      webSocket.send(JSON.stringify({ type: 'endCall' }));
+  
+    if (webSocket && webSocket.readyState === WebSocket.OPEN) {
+      webSocket.close();
     }
   };
 
@@ -98,8 +121,8 @@ const Home = () => {
       <div className="bg-white shadow-lg rounded-lg p-6 w-full max-w-4xl">
         <h1 className="text-2xl font-semibold text-center mb-6 text-gray-800">WebRTC Video Call</h1>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          <video ref={localVideoRef} autoPlay muted className="w-full h-64 bg-black rounded-lg" />
-          <video ref={remoteVideoRef} autoPlay className="w-full h-64 bg-black rounded-lg" />
+          <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-64 bg-black rounded-lg" />
+          <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-64 bg-black rounded-lg" />
         </div>
         <div className="flex justify-center space-x-4">
           <button

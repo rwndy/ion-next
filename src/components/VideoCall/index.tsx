@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, MicOff, Video, VideoOff } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Camera, Mic, MicOff, Video, VideoOff } from 'lucide-react';
 
 interface WebSocketMessage {
   type: 'offer' | 'answer' | 'candidate';
@@ -8,20 +8,15 @@ interface WebSocketMessage {
   candidate?: RTCIceCandidateInit;
 }
 
-const VideoCall: React.FC = () => {
+const WebRTCVideoChat: React.FC = () => {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
   const [isVideoOff, setIsVideoOff] = useState<boolean>(false);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const websocketRef = useRef<WebSocket | null>(null);
-
-  const handleTrack = useCallback((event: RTCTrackEvent) => {
-    if (remoteVideoRef.current && event.streams[0]) {
-      remoteVideoRef.current.srcObject = event.streams[0];
-    }
-  }, []);
 
   useEffect(() => {
     const initWebRTC = async () => {
@@ -36,7 +31,12 @@ const VideoCall: React.FC = () => {
           iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
         });
 
-        peerConnection.ontrack = handleTrack;
+        peerConnection.ontrack = (event: RTCTrackEvent) => {
+          setRemoteStream(event.streams[0]);
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = event.streams[0];
+          }
+        };
 
         stream.getTracks().forEach((track) => {
           peerConnection.addTrack(track, stream);
@@ -66,52 +66,45 @@ const VideoCall: React.FC = () => {
         websocketRef.current.close();
       }
     };
-  }, [handleTrack]);
+  }, []);
 
   const handleWebSocketMessage = async (event: MessageEvent) => {
     const message: WebSocketMessage = JSON.parse(event.data);
-    const peerConnection = peerConnectionRef.current;
-    if (!peerConnection) return;
+    if (!peerConnectionRef.current) return;
 
     switch (message.type) {
       case 'offer':
-        if (message.offer) {
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(message.offer));
-          const answer = await peerConnection.createAnswer();
-          await peerConnection.setLocalDescription(answer);
-          websocketRef.current?.send(JSON.stringify({ type: 'answer', answer }));
-        }
+        await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(message.offer));
+        const answer = await peerConnectionRef.current.createAnswer();
+        await peerConnectionRef.current.setLocalDescription(answer);
+        websocketRef.current?.send(JSON.stringify({ type: 'answer', answer }));
         break;
       case 'answer':
-        if (message.answer) {
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(message.answer));
-        }
+        await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(message.answer));
         break;
       case 'candidate':
-        if (message.candidate) {
-          await peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate));
-        }
+        await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(message.candidate));
         break;
     }
   };
 
-  const toggleAudio = useCallback(() => {
+  const toggleAudio = () => {
     if (localStream) {
       localStream.getAudioTracks().forEach(track => {
         track.enabled = !track.enabled;
       });
-      setIsAudioMuted(prev => !prev);
+      setIsAudioMuted(!isAudioMuted);
     }
-  }, [localStream]);
+  };
 
-  const toggleVideo = useCallback(() => {
+  const toggleVideo = () => {
     if (localStream) {
       localStream.getVideoTracks().forEach(track => {
         track.enabled = !track.enabled;
       });
-      setIsVideoOff(prev => !prev);
+      setIsVideoOff(!isVideoOff);
     }
-  }, [localStream]);
+  };
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
@@ -157,4 +150,4 @@ const VideoCall: React.FC = () => {
   );
 };
 
-export default VideoCall;
+export default WebRTCVideoChat;

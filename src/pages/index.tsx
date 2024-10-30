@@ -1,5 +1,5 @@
 
-import VideoCall from '../components/VideoCall';
+
 import WebRTC from '@/components/WebRTC';
 
 const Home = () => {
